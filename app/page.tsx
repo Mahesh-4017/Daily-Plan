@@ -15,7 +15,7 @@ import {
   toggleTodo,
   deleteTodo,
 } from "@/lib/firestore-todos";
-import { AlertCircle, Loader2, ListTodo } from "lucide-react";
+import { AlertCircle, Loader2, ListTodo, UserPlus } from "lucide-react";
 
 export default function Home() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -34,23 +34,33 @@ export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
 
+  // 1. Client-side initialization & session restore
   useEffect(() => {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     setTodayStr(today);
     setSelectedDate(today);
 
-    // Restore saved user profile session
     try {
       const saved = localStorage.getItem("todo_user_session");
       if (saved) {
         setUserProfile(JSON.parse(saved));
+      } else {
+        // If not logged in on first visit, open the sign-in modal
+        setAuthModalOpen(true);
       }
     } catch (e) {
       console.warn("Could not restore user session:", e);
     }
+  }, []);
+
+  // 2. Real-time Firestore subscription isolated to the active username
+  useEffect(() => {
+    const username = userProfile?.username || "guest";
+    setLoading(true);
 
     const unsubscribe = subscribeToTodos(
+      username,
       (loaded) => {
         setTodos(loaded);
         setLoading(false);
@@ -58,16 +68,15 @@ export default function Home() {
       },
       (err) => {
         console.error("Firestore error:", err);
-        setError(
-          "Unable to load plans. Please check your connection."
-        );
+        setError("Unable to load plans. Please check your connection.");
         setLoading(false);
       }
     );
-    return () => unsubscribe();
-  }, []);
 
-  // Update browser tab title dynamically based on active page
+    return () => unsubscribe();
+  }, [userProfile?.username]);
+
+  // 3. Dynamic browser tab title
   useEffect(() => {
     document.title =
       currentTab === "planner"
@@ -82,6 +91,7 @@ export default function Home() {
     setUserProfile(null);
   };
 
+  const currentUsername = userProfile?.username || "guest";
   const effective = selectedDate || todayStr;
   const dayTodos = todos.filter((t) => t.date === effective);
   const dayCompleted = dayTodos.filter((t) => t.completed).length;
@@ -91,10 +101,18 @@ export default function Home() {
   const openEdit = (t: TodoItem) => { setEditingTodo(t); setModalOpen(true); };
 
   const handleSave = async (data: Omit<TodoItem, "id">, editId?: string) => {
-    editId ? await updateTodo(editId, data) : await addTodo(data);
+    editId
+      ? await updateTodo(currentUsername, editId, data)
+      : await addTodo(currentUsername, data);
   };
-  const handleToggle = async (id: string, cur: boolean) => { await toggleTodo(id, !cur); };
-  const handleDelete = async (id: string) => { await deleteTodo(id); };
+
+  const handleToggle = async (id: string, cur: boolean) => {
+    await toggleTodo(currentUsername, id, !cur);
+  };
+
+  const handleDelete = async (id: string) => {
+    await deleteTodo(currentUsername, id);
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100">
@@ -111,6 +129,29 @@ export default function Home() {
       />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
+        {/* Guest Banner if not signed in */}
+        {!userProfile && (
+          <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-400">
+                <UserPlus className="h-4.5 w-4.5" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-white">Viewing as Guest</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  Sign in with your username so all your plans and analytics are saved under your personal account.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setAuthModalOpen(true)}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-500 whitespace-nowrap transition"
+            >
+              Sign In / Choose Username
+            </button>
+          </div>
+        )}
+
         {/* Connection issue banner */}
         {error && (
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-xs text-zinc-300">
@@ -125,7 +166,7 @@ export default function Home() {
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32">
             <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mb-3" />
-            <p className="text-sm text-zinc-500">Loading plans...</p>
+            <p className="text-sm text-zinc-500">Loading your plans...</p>
           </div>
         ) : currentTab === "planner" ? (
           <div className="space-y-5">
