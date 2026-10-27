@@ -15,7 +15,18 @@ import {
   toggleTodo,
   deleteTodo,
 } from "@/lib/firestore-todos";
-import { AlertCircle, Loader2, ListTodo, UserPlus } from "lucide-react";
+import {
+  AlertCircle,
+  Loader2,
+  ListTodo,
+  ShieldCheck,
+  Lock,
+  CalendarDays,
+  BarChart2,
+  ArrowRight,
+  UserPlus,
+  LogIn,
+} from "lucide-react";
 
 export default function Home() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -26,6 +37,7 @@ export default function Home() {
   // User Profile & Authentication State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "register">("signin");
 
   // Deferred client-side date init (Next.js 16 prerender safe)
   const [todayStr, setTodayStr] = useState("");
@@ -46,19 +58,24 @@ export default function Home() {
       if (saved) {
         setUserProfile(JSON.parse(saved));
       } else {
-        // If not logged in on first visit, open the sign-in modal
-        setAuthModalOpen(true);
+        setLoading(false);
       }
     } catch (e) {
       console.warn("Could not restore user session:", e);
+      setLoading(false);
     }
   }, []);
 
-  // 2. Real-time Firestore subscription isolated to the active username
+  // 2. Real-time Firestore subscription strictly isolated to logged-in user
   useEffect(() => {
-    const username = userProfile?.username || "guest";
-    setLoading(true);
+    const username = userProfile?.username;
+    if (!username) {
+      setTodos([]);
+      setLoading(false);
+      return;
+    }
 
+    setLoading(true);
     const unsubscribe = subscribeToTodos(
       username,
       (loaded) => {
@@ -89,28 +106,51 @@ export default function Home() {
       localStorage.removeItem("todo_user_session");
     } catch {}
     setUserProfile(null);
+    setTodos([]);
   };
 
-  const currentUsername = userProfile?.username || "guest";
+  const openAuth = (mode: "signin" | "register") => {
+    setAuthMode(mode);
+    setAuthModalOpen(true);
+  };
+
+  const currentUsername = userProfile?.username || "";
   const effective = selectedDate || todayStr;
   const dayTodos = todos.filter((t) => t.date === effective);
   const dayCompleted = dayTodos.filter((t) => t.completed).length;
   const todayTodos = todos.filter((t) => t.date === todayStr);
 
-  const openNew = () => { setEditingTodo(null); setModalOpen(true); };
-  const openEdit = (t: TodoItem) => { setEditingTodo(t); setModalOpen(true); };
+  const openNew = () => {
+    if (!userProfile) {
+      openAuth("signin");
+      return;
+    }
+    setEditingTodo(null);
+    setModalOpen(true);
+  };
+
+  const openEdit = (t: TodoItem) => {
+    setEditingTodo(t);
+    setModalOpen(true);
+  };
 
   const handleSave = async (data: Omit<TodoItem, "id">, editId?: string) => {
+    if (!currentUsername) {
+      openAuth("signin");
+      return;
+    }
     editId
       ? await updateTodo(currentUsername, editId, data)
       : await addTodo(currentUsername, data);
   };
 
   const handleToggle = async (id: string, cur: boolean) => {
+    if (!currentUsername) return;
     await toggleTodo(currentUsername, id, !cur);
   };
 
   const handleDelete = async (id: string) => {
+    if (!currentUsername) return;
     await deleteTodo(currentUsername, id);
   };
 
@@ -124,34 +164,11 @@ export default function Home() {
         completedCount={todayTodos.filter((t) => t.completed).length}
         selectedDate={effective}
         userProfile={userProfile}
-        onOpenAuthModal={() => setAuthModalOpen(true)}
+        onOpenAuthModal={() => openAuth("signin")}
         onLogout={handleLogout}
       />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
-        {/* Guest Banner if not signed in */}
-        {!userProfile && (
-          <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-400">
-                <UserPlus className="h-4.5 w-4.5" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-white">Viewing as Guest</p>
-                <p className="text-[11px] text-zinc-400 mt-0.5">
-                  Sign in with your username so all your plans and analytics are saved under your personal account.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setAuthModalOpen(true)}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-500 whitespace-nowrap transition"
-            >
-              Sign In / Choose Username
-            </button>
-          </div>
-        )}
-
         {/* Connection issue banner */}
         {error && (
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-xs text-zinc-300">
@@ -163,12 +180,85 @@ export default function Home() {
           </div>
         )}
 
-        {loading ? (
+        {/* ── Condition A: User NOT Logged In (Landing / Auth Required Gate) ── */}
+        {!userProfile ? (
+          <div className="flex flex-col items-center justify-center py-12 sm:py-16">
+            <div className="w-full max-w-xl text-center">
+              {/* Badge */}
+              <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3.5 py-1.5 text-xs font-semibold text-indigo-400 mb-6">
+                <ShieldCheck className="h-4 w-4" />
+                <span>Private & Isolated Accounts</span>
+              </div>
+
+              {/* Title */}
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                Your Personal Daily Planner
+              </h1>
+              <p className="mt-3 text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+                Sign in with your username and password, or register a new account. Every user has their own completely isolated plans and analytics.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+                <button
+                  onClick={() => openAuth("signin")}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-xs font-bold text-white shadow-lg shadow-indigo-600/25 hover:bg-indigo-500 transition-all active:scale-95"
+                >
+                  <LogIn className="h-4 w-4" />
+                  <span>Sign In to Account</span>
+                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </button>
+                <button
+                  onClick={() => openAuth("register")}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-6 py-3 text-xs font-bold text-zinc-200 hover:border-indigo-500 hover:text-white transition-all active:scale-95"
+                >
+                  <UserPlus className="h-4 w-4 text-indigo-400" />
+                  <span>Register New Account</span>
+                </button>
+              </div>
+
+              {/* Feature Cards Grid */}
+              <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-400 mb-3">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-xs font-bold text-white">Private Storage</h3>
+                  <p className="mt-1 text-[11px] text-zinc-400 leading-normal">
+                    Your plans are saved strictly under your username. No other user can view or edit your tasks.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-400 mb-3">
+                    <CalendarDays className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-xs font-bold text-white">Time Scheduling</h3>
+                  <p className="mt-1 text-[11px] text-zinc-400 leading-normal">
+                    Schedule items by time and category (Work, Study, Health). Stay organized every day.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-400 mb-3">
+                    <BarChart2 className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-xs font-bold text-white">Visual Analytics</h3>
+                  <p className="mt-1 text-[11px] text-zinc-400 leading-normal">
+                    Track completion rates, weekly rhythm schedules, and category breakdowns automatically.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : loading ? (
+          /* ── Condition B: Loading User's Plans ── */
           <div className="flex flex-col items-center justify-center py-32">
             <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mb-3" />
-            <p className="text-sm text-zinc-500">Loading your plans...</p>
+            <p className="text-sm text-zinc-500">Loading {userProfile.name}&apos;s plans...</p>
           </div>
         ) : currentTab === "planner" ? (
+          /* ── Condition C: Logged In - Planner View ── */
           <div className="space-y-5">
             {/* Planner Section Header & Title */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -178,7 +268,7 @@ export default function Home() {
                   Daily Planner
                 </h1>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  Schedule, organize, and check off your daily plans
+                  Schedule, organize, and check off your personal daily plans
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -206,9 +296,13 @@ export default function Home() {
             />
           </div>
         ) : (
+          /* ── Condition D: Logged In - Analytics View ── */
           <AnalyticsDashboard
             todos={todos}
-            onSelectDate={(d) => { setSelectedDate(d); setCurrentTab("planner"); }}
+            onSelectDate={(d) => {
+              setSelectedDate(d);
+              setCurrentTab("planner");
+            }}
           />
         )}
       </main>
@@ -219,7 +313,7 @@ export default function Home() {
           <span>TODO Plan</span>
           <div className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-indigo-600" />
-            <span>Live</span>
+            <span>{userProfile ? `Signed in as @${userProfile.username}` : "Not signed in"}</span>
           </div>
         </div>
       </footer>
@@ -238,6 +332,7 @@ export default function Home() {
         onClose={() => setAuthModalOpen(false)}
         onLoginSuccess={(profile) => setUserProfile(profile)}
         currentProfile={userProfile}
+        initialMode={authMode}
       />
     </div>
   );
